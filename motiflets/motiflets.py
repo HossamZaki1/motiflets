@@ -9,7 +9,8 @@ __author__ = ["patrickzib"]
 import itertools
 from ast import literal_eval
 from os.path import exists
-
+from typing import Optional
+from dtaidistance import dtw
 import numpy as np
 import numpy.fft as fft
 import pandas as pd
@@ -276,6 +277,65 @@ def _sliding_mean_std(ts, m):
 
     return [movmean, movstd]
 
+#@njit(fastmath=True, cache=True)
+def _dtw_matrix(
+    subseqs: np.ndarray,
+    window: Optional[int] = None,
+    max_dist: float = np.inf,
+    use_lb: bool = True,
+) -> np.ndarray:
+    """Return an n×n DTW distance matrix for *z‑normed* subsequences.
+
+    Parameters
+    ----------
+    subseqs : ndarray, shape = (n, m)
+        Collection of windows (already z‑normalised).
+    window : int or None, optional
+        Sakoe–Chiba radius in *points* (None ⇒ classic DTW).
+    max_dist : float, optional
+        Early abandon cut‑off (∞ keeps classic DTW).
+    use_lb : bool, optional
+        Whether to enable LB_Keogh pruning (recommended).
+    """
+    #print("hih")
+    # `distance_matrix_fast` expects a *list* of 1‑D float64 arrays
+    series = []
+    for s in subseqs:
+        s64 = s.astype(np.float64)
+        s_contig = np.ascontiguousarray(s64)
+        series.append(s_contig)
+
+    condensed = dtw.distance_matrix_fast(
+        series,
+        #window=window,
+        #max_dist=max_dist,
+        #use_pruning=use_lb,
+        parallel=True,
+        compact=True,  # → condensed upper‑triangular vector
+    )
+    full = dtw.distances_array_to_matrix(condensed, len(subseqs))
+    np.fill_diagonal(full, 0.0)
+    return full.astype(np.float32)
+
+
+@njit(fastmath=True, cache=True)
+def _row_mean_std(arr):
+    n, m = arr.shape
+    mean_out = np.zeros(n, dtype=np.float32)
+    std_out = np.zeros(n, dtype=np.float32)
+    for i in range(n):
+        s = 0.0
+        for j in range(m):
+            s += arr[i, j]
+        mean_out[i] = s / m
+    for i in range(n):
+        s = 0.0
+        for j in range(m):
+            diff = arr[i, j] - mean_out[i]
+            s += diff * diff
+        # small epsilon
+        std_out[i] = np.sqrt(s / m) + 1e-8
+    return mean_out, std_out
 
 @njit(fastmath=True, cache=True, parallel=True)
 def compute_distances_with_knns(
@@ -286,7 +346,10 @@ def compute_distances_with_knns(
         n_jobs=4,
         slack=0.5,
         distance=znormed_euclidean_distance,
-        distance_preprocessing=sliding_mean_std
+        distance_preprocessing=sliding_mean_std,
+        metric="dtw",
+        dtw_window=None,
+        dtw_max_dist=np.inf
 ):
     """Compute the full Distance Matrix between all pairs of subsequences.
 
@@ -326,7 +389,6 @@ def compute_distances_with_knns(
 
     """
     assert time_series.ndim == 2  # Input dim must be 2d
-
     dims = time_series.shape[0]
     n = np.int32(time_series.shape[-1] - m + 1)
     halve_m = 0
@@ -335,6 +397,46 @@ def compute_distances_with_knns(
 
     D = np.zeros((n, n), dtype=np.float32)
     knns = np.zeros((n, k), dtype=np.int32)
+
+    if metric.lower() == "dtw":
+        # 1.  Build z‑normed (n, m) window matrix *per* dimension
+        for d in range(dims):
+            # Sliding windows view → shape (n, m)
+            win = np.lib.stride_tricks.sliding_window_view(
+                time_series[d], m
+            ).astype(np.float32)
+            
+            # z‑normalise each window
+            mu, sigma = _row_mean_std(win)
+            for rr in range(win.shape[0]):
+                for cc in range(win.shape[1]):
+                    win[rr, cc] = (win[rr, cc] - mu[rr]) / sigma[rr]
+            with objmode(D='float32[:,:]'):
+                #print("hellow world", flush=True)
+                temp = _dtw_matrix(
+                    win
+                )
+                #print("temp shape", temp.shape, flush=True)
+                #print("temp type", temp.dtype, flush=True)
+                #print("D shape", D.shape, flush=True)
+                #print("D type", D.dtype, flush=True)
+                D += temp
+
+        # 2.  Average over dimensions
+        D /= dims
+
+        # 3.  Exclude trivial matches (self + neighbourhood)
+        if exclude_trivial_match:
+            for i in range(n):
+                D[i, max(0, i - halve_m) : i + halve_m + 1] = np.inf
+
+        # 4.  k‑NN indices row‑by‑row (original helper)
+        for i in range(n):
+            knn = _argknn(D[i], k, m, slack=slack)
+            knns[i, : len(knn)] = knn
+            knns[i, len(knn) :] = -1
+
+        return D, knns  # ≤─── EARLY RETURN ────────────────────────────────
 
     bin_size = time_series.shape[-1] // n_jobs
 

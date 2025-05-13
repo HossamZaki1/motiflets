@@ -132,6 +132,7 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+dtaidistance/
 MANIFEST
 
 # PyInstaller
@@ -234,3 +235,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+master.zip
