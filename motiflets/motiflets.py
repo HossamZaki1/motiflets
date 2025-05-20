@@ -323,7 +323,7 @@ def _compute_multi_dim_dtw(time_series: np.ndarray, m: int) -> np.ndarray:
     sliding–window view of `time_series`.
     """
     dims, L = time_series.shape
-    # 1) build & normalize sliding windows for each dim
+    # build & normalize sliding windows for each dim
     windows = []
     for d in range(dims):
         win = np.lib.stride_tricks.sliding_window_view(time_series[d], m).astype(np.float32)
@@ -331,7 +331,7 @@ def _compute_multi_dim_dtw(time_series: np.ndarray, m: int) -> np.ndarray:
         win = (win - mu[:, None]) / sigma[:, None]
         windows.append(win)
 
-    # 2) accumulate per‐dim DTW
+    # accumulate DTW
     D = np.zeros((windows[0].shape[0],) * 2, dtype=np.float32)
     for win in windows:
         series = [np.ascontiguousarray(s.astype(np.float64)) for s in win]
