@@ -309,13 +309,41 @@ def _dtw_matrix(
         series,
         #window=window,
         #max_dist=max_dist,
-        #use_pruning=use_lb,
+        use_pruning=use_lb,
         parallel=True,
-        compact=True,  # → condensed upper‑triangular vector
+        compact=True,  # condensed upper‑triangular vector
     )
     full = dtw.distances_array_to_matrix(condensed, len(subseqs))
     np.fill_diagonal(full, 0.0)
     return full.astype(np.float32)
+
+def _compute_multi_dim_dtw(time_series: np.ndarray, m: int) -> np.ndarray:
+    """
+    Build the full DTW distance matrix for an (n_windows × m × dims)
+    sliding–window view of `time_series`.
+    """
+    dims, L = time_series.shape
+    # 1) build & normalize sliding windows for each dim
+    windows = []
+    for d in range(dims):
+        win = np.lib.stride_tricks.sliding_window_view(time_series[d], m).astype(np.float32)
+        mu, sigma = _row_mean_std(win)
+        win = (win - mu[:, None]) / sigma[:, None]
+        windows.append(win)
+
+    # 2) accumulate per‐dim DTW
+    D = np.zeros((windows[0].shape[0],) * 2, dtype=np.float32)
+    for win in windows:
+        series = [np.ascontiguousarray(s.astype(np.float64)) for s in win]
+        condensed = dtw.distance_matrix_fast(series,
+                                                parallel=True,
+                                                compact=True,
+                                                use_pruning=True)
+        full = dtw.distances_array_to_matrix(condensed, len(win))
+        np.fill_diagonal(full, 0.0)
+        D += full.astype(np.float32)
+
+    return D / dims
 
 
 @njit(fastmath=True, cache=True)
@@ -399,45 +427,24 @@ def compute_distances_with_knns(
     knns = np.zeros((n, k), dtype=np.int32)
 
     if metric.lower() == "dtw":
-        # 1.  Build z‑normed (n, m) window matrix *per* dimension
-        for d in range(dims):
-            # Sliding windows view → shape (n, m)
-            win = np.lib.stride_tricks.sliding_window_view(
-                time_series[d], m
-            ).astype(np.float32)
-            
-            # z‑normalise each window
-            mu, sigma = _row_mean_std(win)
-            for rr in range(win.shape[0]):
-                for cc in range(win.shape[1]):
-                    win[rr, cc] = (win[rr, cc] - mu[rr]) / sigma[rr]
-            with objmode(D='float32[:,:]'):
-                #print("hellow world", flush=True)
-                temp = _dtw_matrix(
-                    win
-                )
-                #print("temp shape", temp.shape, flush=True)
-                #print("temp type", temp.dtype, flush=True)
-                #print("D shape", D.shape, flush=True)
-                #print("D type", D.dtype, flush=True)
-                D += temp
+        assert time_series.ndim == 2
+        with objmode(D="float32[:,:]"):
+            D = _compute_multi_dim_dtw(time_series, m)
 
-        # 2.  Average over dimensions
-        D /= dims
-
-        # 3.  Exclude trivial matches (self + neighbourhood)
+        # trivial‐match exclusion
         if exclude_trivial_match:
-            for i in range(n):
-                D[i, max(0, i - halve_m) : i + halve_m + 1] = np.inf
+            half = int(m * slack)
+            for i in range(D.shape[0]):
+                D[i, max(0, i - half):i + half + 1] = np.inf
 
-        # 4.  k‑NN indices row‑by‑row (original helper)
-        for i in range(n):
-            knn = _argknn(D[i], k, m, slack=slack)
-            knns[i, : len(knn)] = knn
-            knns[i, len(knn) :] = -1
+        # now use the existing _argknn to extract knns
+        knns = np.zeros((D.shape[0], k), dtype=np.int32)
+        for i in range(D.shape[0]):
+            kn = _argknn(D[i], k, m, slack=slack)
+            knns[i, :len(kn)] = kn
+            knns[i, len(kn):] = -1
 
-        return D, knns  # ≤─── EARLY RETURN ────────────────────────────────
-
+        return D, knns
     bin_size = time_series.shape[-1] // n_jobs
 
     for idx in prange(n_jobs):
