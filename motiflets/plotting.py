@@ -666,7 +666,8 @@ def plot_elbow(
         elbow_deviation=1.00,
         slack=0.5,
         distance=znormed_euclidean_distance,
-        distance_preprocessing=sliding_mean_std
+        distance_preprocessing=sliding_mean_std,
+        dtw=True
 ):
     """Plots the elbow-plot for k-Motiflets.
 
@@ -703,6 +704,8 @@ def plot_elbow(
         The distance function to be computed.
     distance_preprocessing: callable (default=sliding_mean_std)
         The distance preprocessing function to be computed.
+    dtw: bool (default=True)
+        If True, uses DTW instead of ED.
 
     Returns
     -------
@@ -732,7 +735,8 @@ def plot_elbow(
             elbow_deviation=elbow_deviation,
             slack=slack,
             distance=distance,
-            distance_preprocessing=distance_preprocessing
+            distance_preprocessing=distance_preprocessing,
+            dtw=dtw
         )
     endTime = (time.perf_counter() - startTime)
 
@@ -784,7 +788,8 @@ def plot_motif_length_selection(
         slack=0.5,
         subsample=2,
         distance=znormed_euclidean_distance,
-        distance_preprocessing=sliding_mean_std
+        distance_preprocessing=sliding_mean_std,
+        dtw=True
 ):
     """Computes the AU_EF plot to extract the best motif lengths
 
@@ -818,6 +823,8 @@ def plot_motif_length_selection(
         The distance function to be computed.
     distance_preprocessing: callable (default=sliding_mean_std)
         The distance preprocessing function to be computed.
+    dtw: bool (default=True)
+        If True, uses DTW instead of ED.
 
     Returns
     -------
@@ -845,7 +852,8 @@ def plot_motif_length_selection(
             slack=slack,
             subsample=subsample,
             distance=distance,
-            distance_preprocessing=distance_preprocessing
+            distance_preprocessing=distance_preprocessing,
+            dtw=dtw
         )
     endTime = (time.perf_counter() - startTime)
     print("\tTime", np.round(endTime, 1), "s")
