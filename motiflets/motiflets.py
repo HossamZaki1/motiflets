@@ -277,46 +277,6 @@ def _sliding_mean_std(ts, m):
 
     return [movmean, movstd]
 
-#@njit(fastmath=True, cache=True)
-def _dtw_matrix(
-    subseqs: np.ndarray,
-    window: Optional[int] = None,
-    max_dist: float = np.inf,
-    use_lb: bool = True,
-) -> np.ndarray:
-    """Return an n×n DTW distance matrix for *z‑normed* subsequences.
-
-    Parameters
-    ----------
-    subseqs : ndarray, shape = (n, m)
-        Collection of windows (already z‑normalised).
-    window : int or None, optional
-        Sakoe–Chiba radius in *points* (None ⇒ classic DTW).
-    max_dist : float, optional
-        Early abandon cut‑off (∞ keeps classic DTW).
-    use_lb : bool, optional
-        Whether to enable LB_Keogh pruning (recommended).
-    """
-    #print("hih")
-    # `distance_matrix_fast` expects a *list* of 1‑D float64 arrays
-    series = []
-    for s in subseqs:
-        s64 = s.astype(np.float64)
-        s_contig = np.ascontiguousarray(s64)
-        series.append(s_contig)
-
-    condensed = dtw.distance_matrix_fast(
-        series,
-        #window=window,
-        #max_dist=max_dist,
-        use_pruning=use_lb,
-        parallel=True,
-        compact=True,  # condensed upper‑triangular vector
-    )
-    full = dtw.distances_array_to_matrix(condensed, len(subseqs))
-    np.fill_diagonal(full, 0.0)
-    return full.astype(np.float32)
-
 def _compute_multi_dim_dtw(time_series: np.ndarray, m: int) -> np.ndarray:
     """
     Build the full DTW distance matrix for an (n_windows × m × dims)

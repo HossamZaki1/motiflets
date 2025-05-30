@@ -1,3 +1,6 @@
+# Using Dynamic Time Warping
+For using dynamic time warping, the package dtaidistance has to be installed. For performance purposes, it should be installed from source to the local python environment and the c extentions should be compiled. Please follow these instructions: https://dtaidistance.readthedocs.io/en/latest/usage/installation.html#from-source
+
 # Motiflets
 
 This page was built in support of our paper "Motiflets - Simple and Accurate Detection of Motifs in Time Series" by Patrick Schäfer and Ulf Leser, published at <a href="https://www.vldb.org/pvldb/vol16/p725-schafer.pdf">PVLDB, 16(4): 725 - 737, 2022</a>.
